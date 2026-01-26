@@ -10,9 +10,6 @@ Execution: Run button for code execution using Pyodide/WebAssembly; output conso
 
 Dark Theme UI: Matches CollabCode design with top nav, language selector, and tool buttons.
 ​
-
-Visit the project: https://lovable.dev/projects/cce53a15-8e94-4eaf-a25c-49e4e98fee2d
-
 Select language, write/test code, draw on whiteboard.
 
 Collaborate via real-time sharing (invite via email).
