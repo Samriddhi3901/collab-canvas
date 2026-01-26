@@ -1,4 +1,4 @@
-import { Code2, Layout, PenTool, X, Share2, Copy, Check, Eye } from 'lucide-react';
+import { Code2, Layout, PenTool, Share2, Copy, Check, Eye, Users } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { ViewMode, Language, LANGUAGE_CONFIG } from '@/types/editor';
 import { useState } from 'react';
@@ -18,6 +18,7 @@ interface NavbarProps {
   setLanguage: (lang: Language) => void;
   roomId: string;
   isViewOnly: boolean;
+  connectedUsers?: number;
 }
 
 export function Navbar({
@@ -27,6 +28,7 @@ export function Navbar({
   setLanguage,
   roomId,
   isViewOnly,
+  connectedUsers = 1,
 }: NavbarProps) {
   const [copied, setCopied] = useState(false);
 
@@ -115,6 +117,11 @@ export function Navbar({
         <div className="room-badge">
           <span>Room:</span>
           <code className="text-primary">{roomId}</code>
+        </div>
+
+        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-success/20 text-success rounded-lg text-sm font-medium">
+          <Users className="w-4 h-4" />
+          <span>{connectedUsers}</span>
         </div>
 
         <Dialog>
