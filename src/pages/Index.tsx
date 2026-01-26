@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Navbar } from '@/components/Navbar';
@@ -6,7 +6,7 @@ import { CodeEditor } from '@/components/CodeEditor';
 import { WhiteboardCanvas } from '@/components/WhiteboardCanvas';
 import { OutputConsole } from '@/components/OutputConsole';
 import { RunButton } from '@/components/RunButton';
-import { useRoom } from '@/hooks/useRoom';
+import { useRealtimeRoom } from '@/hooks/useRealtimeRoom';
 import { useCodeRunner } from '@/hooks/useCodeRunner';
 import { ViewMode, Language } from '@/types/editor';
 import { Code2, PenTool } from 'lucide-react';
@@ -15,7 +15,7 @@ const Index = () => {
   const [searchParams] = useSearchParams();
   const roomIdFromUrl = searchParams.get('room');
   
-  const { room, isViewOnly, updateCode, updateLanguage } = useRoom(roomIdFromUrl || undefined);
+  const { room, isViewOnly, connectedUsers, updateCode, updateLanguage } = useRealtimeRoom(roomIdFromUrl || undefined);
   const { status, output, runCode, clearOutput } = useCodeRunner();
   
   const [viewMode, setViewMode] = useState<ViewMode>('split');
@@ -65,6 +65,7 @@ const Index = () => {
         setLanguage={handleLanguageChange}
         roomId={room.id}
         isViewOnly={isViewOnly}
+        connectedUsers={connectedUsers}
       />
 
       <div className="flex-1 p-4 flex flex-col gap-4 overflow-hidden">

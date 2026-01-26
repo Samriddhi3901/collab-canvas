@@ -57,27 +57,51 @@ export function useCodeRunner() {
   const runJavaScript = useCallback(async (code: string) => {
     // Capture console outputs
     const logs: OutputLine[] = [];
-    const originalConsole = { ...console };
+    
+    // Store original console methods
+    const originalLog = console.log;
+    const originalError = console.error;
+    const originalWarn = console.warn;
+    const originalInfo = console.info;
 
     const captureLog = (type: OutputLine['type']) => (...args: any[]) => {
-      const content = args.map(arg => 
-        typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
-      ).join(' ');
+      const content = args.map(arg => {
+        if (arg === undefined) return 'undefined';
+        if (arg === null) return 'null';
+        if (typeof arg === 'object') {
+          try {
+            return JSON.stringify(arg, null, 2);
+          } catch {
+            return String(arg);
+          }
+        }
+        return String(arg);
+      }).join(' ');
       logs.push({ type, content, timestamp: new Date() });
     };
 
+    // Override console methods
     console.log = captureLog('log');
     console.error = captureLog('error');
     console.warn = captureLog('warn');
     console.info = captureLog('info');
 
     try {
-      // Create a sandboxed eval
-      const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
-      const fn = new AsyncFunction(code);
-      const result = await fn();
+      // Create a sandboxed function with console available
+      // Wrap code to capture the result of expressions
+      const wrappedCode = `
+        "use strict";
+        ${code}
+      `;
       
-      if (result !== undefined) {
+      // Use Function constructor for synchronous code first
+      const fn = new Function(wrappedCode);
+      const result = fn();
+      
+      // If result is a promise, await it
+      if (result instanceof Promise) {
+        await result;
+      } else if (result !== undefined) {
         logs.push({ 
           type: 'log', 
           content: typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result),
@@ -86,9 +110,19 @@ export function useCodeRunner() {
       }
 
       return logs;
+    } catch (error: any) {
+      logs.push({ 
+        type: 'error', 
+        content: `${error.name}: ${error.message}`,
+        timestamp: new Date() 
+      });
+      return logs;
     } finally {
-      // Restore console
-      Object.assign(console, originalConsole);
+      // Restore original console methods
+      console.log = originalLog;
+      console.error = originalError;
+      console.warn = originalWarn;
+      console.info = originalInfo;
     }
   }, []);
 
