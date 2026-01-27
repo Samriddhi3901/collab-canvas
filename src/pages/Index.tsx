@@ -10,6 +10,7 @@ import { useRealtimeRoom } from '@/hooks/useRealtimeRoom';
 import { useCodeRunner } from '@/hooks/useCodeRunner';
 import { ViewMode, Language, UserPresence, CursorPosition } from '@/types/editor';
 import { Code2, PenTool } from 'lucide-react';
+import { TLEditorSnapshot } from 'tldraw';
 
 const Index = () => {
   const [searchParams] = useSearchParams();
@@ -20,9 +21,11 @@ const Index = () => {
     isViewOnly, 
     connectedUsers, 
     remotePresence,
+    remoteWhiteboardSnapshot,
     updateCode, 
     updateLanguage,
     updateCursor,
+    broadcastWhiteboard,
   } = useRealtimeRoom(roomIdFromUrl || undefined);
   const { status, output, runCode, clearOutput } = useCodeRunner();
   
@@ -133,7 +136,12 @@ const Index = () => {
                 exit={{ opacity: 0, x: 20 }}
                 className="flex-1 panel min-h-0"
               >
-                <WhiteboardCanvas isReadOnly={isViewOnly} />
+                <WhiteboardCanvas 
+                  isReadOnly={isViewOnly} 
+                  onSnapshot={broadcastWhiteboard}
+                  remoteSnapshot={remoteWhiteboardSnapshot}
+                  roomId={room.id}
+                />
               </motion.div>
             )}
 
@@ -155,6 +163,9 @@ const Index = () => {
                     isViewOnly={isViewOnly}
                     remotePresence={remotePresence}
                     onCursorChange={updateCursor}
+                    onWhiteboardSnapshot={broadcastWhiteboard}
+                    remoteWhiteboardSnapshot={remoteWhiteboardSnapshot}
+                    roomId={room.id}
                   />
                 </div>
 
@@ -178,9 +189,22 @@ interface SplitViewPanelProps {
   isViewOnly: boolean;
   remotePresence?: UserPresence[];
   onCursorChange?: (cursor: CursorPosition | null, selection?: { start: CursorPosition; end: CursorPosition }) => void;
+  onWhiteboardSnapshot?: (snapshot: TLEditorSnapshot) => void;
+  remoteWhiteboardSnapshot?: TLEditorSnapshot | null;
+  roomId?: string;
 }
 
-function SplitViewPanel({ code, language, onChange, isViewOnly, remotePresence, onCursorChange }: SplitViewPanelProps) {
+function SplitViewPanel({ 
+  code, 
+  language, 
+  onChange, 
+  isViewOnly, 
+  remotePresence, 
+  onCursorChange,
+  onWhiteboardSnapshot,
+  remoteWhiteboardSnapshot,
+  roomId,
+}: SplitViewPanelProps) {
   const [activeTab, setActiveTab] = useState<'code' | 'whiteboard'>('code');
 
   return (
@@ -203,7 +227,7 @@ function SplitViewPanel({ code, language, onChange, isViewOnly, remotePresence, 
           }`}
         >
           <PenTool className="w-4 h-4" />
-          Custom Whiteboard
+          Whiteboard
         </button>
       </div>
 
@@ -235,7 +259,12 @@ function SplitViewPanel({ code, language, onChange, isViewOnly, remotePresence, 
               exit={{ opacity: 0 }}
               className="h-full"
             >
-              <WhiteboardCanvas isReadOnly={isViewOnly} />
+              <WhiteboardCanvas 
+                isReadOnly={isViewOnly}
+                onSnapshot={onWhiteboardSnapshot}
+                remoteSnapshot={remoteWhiteboardSnapshot}
+                roomId={roomId}
+              />
             </motion.div>
           )}
         </AnimatePresence>

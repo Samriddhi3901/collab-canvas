@@ -3,6 +3,7 @@ import { nanoid } from 'nanoid';
 import { supabase } from '@/integrations/supabase/client';
 import { Language, LANGUAGE_CONFIG, Room, UserPresence, CursorPosition } from '@/types/editor';
 import { RealtimeChannel } from '@supabase/supabase-js';
+import { TLEditorSnapshot } from 'tldraw';
 
 const STORAGE_KEY = 'collabcode_rooms';
 const SYNC_INTERVAL = 50; // 50ms for low-latency sync
@@ -17,6 +18,7 @@ export function useRealtimeRoom(roomId?: string) {
   const [loading, setLoading] = useState(true);
   const [connectedUsers, setConnectedUsers] = useState<number>(1);
   const [remotePresence, setRemotePresence] = useState<UserPresence[]>([]);
+  const [remoteWhiteboardSnapshot, setRemoteWhiteboardSnapshot] = useState<TLEditorSnapshot | null>(null);
   
   const channelRef = useRef<RealtimeChannel | null>(null);
   const userIdRef = useRef<string>(nanoid(8));
@@ -26,6 +28,8 @@ export function useRealtimeRoom(roomId?: string) {
   const pendingCodeRef = useRef<string | null>(null);
   const syncTimerRef = useRef<number | null>(null);
   const lastSyncRef = useRef<number>(0);
+  const whiteboardSnapshotRef = useRef<TLEditorSnapshot | null>(null);
+  const lastWhiteboardSyncRef = useRef<number>(0);
 
   // Get stored room data
   const getStoredRoom = useCallback((id: string) => {
@@ -114,6 +118,27 @@ export function useRealtimeRoom(roomId?: string) {
     }
   }, []);
 
+  // Broadcast whiteboard snapshot
+  const broadcastWhiteboard = useCallback((snapshot: TLEditorSnapshot) => {
+    if (!channelRef.current) return;
+    
+    const now = Date.now();
+    if (now - lastWhiteboardSyncRef.current < 100) return;
+    
+    lastWhiteboardSyncRef.current = now;
+    whiteboardSnapshotRef.current = snapshot;
+    
+    channelRef.current.send({
+      type: 'broadcast',
+      event: 'whiteboard_update',
+      payload: {
+        snapshot,
+        updatedBy: userIdRef.current,
+        timestamp: now,
+      },
+    });
+  }, []);
+
   // Update cursor position
   const updateCursor = useCallback((cursor: CursorPosition | null, selection?: { start: CursorPosition; end: CursorPosition }) => {
     if (!channelRef.current) return;
@@ -196,6 +221,7 @@ export function useRealtimeRoom(roomId?: string) {
             payload: {
               code: currentRoom.code,
               language: currentRoom.language,
+              whiteboard: whiteboardSnapshotRef.current,
               fromOwner: true,
             },
           });
@@ -215,6 +241,16 @@ export function useRealtimeRoom(roomId?: string) {
             language: payload.language,
           };
         });
+        if (payload.whiteboard) {
+          setRemoteWhiteboardSnapshot(payload.whiteboard);
+        }
+      }
+    });
+
+    // Listen for whiteboard updates
+    channel.on('broadcast', { event: 'whiteboard_update' }, ({ payload }) => {
+      if (payload.updatedBy !== userIdRef.current) {
+        setRemoteWhiteboardSnapshot(payload.snapshot);
       }
     });
 
@@ -344,10 +380,12 @@ export function useRealtimeRoom(roomId?: string) {
     loading,
     connectedUsers,
     remotePresence,
+    remoteWhiteboardSnapshot,
     createRoom,
     updateCode,
     updateLanguage,
     updateCursor,
+    broadcastWhiteboard,
     userId: userIdRef.current,
     userColor: userColorRef.current,
   };
