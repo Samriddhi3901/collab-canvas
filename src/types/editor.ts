@@ -11,6 +11,20 @@ export interface Room {
   isOwner: boolean;
 }
 
+export interface CursorPosition {
+  lineNumber: number;
+  column: number;
+}
+
+export interface UserPresence {
+  id: string;
+  name: string;
+  color: string;
+  cursor?: CursorPosition;
+  selection?: { start: CursorPosition; end: CursorPosition };
+  isOwner: boolean;
+}
+
 export interface OutputLine {
   type: 'log' | 'error' | 'info' | 'warn';
   content: string;

@@ -1,26 +1,31 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { nanoid } from 'nanoid';
 import { supabase } from '@/integrations/supabase/client';
-import { Language, LANGUAGE_CONFIG, Room } from '@/types/editor';
+import { Language, LANGUAGE_CONFIG, Room, UserPresence, CursorPosition } from '@/types/editor';
 import { RealtimeChannel } from '@supabase/supabase-js';
 
 const STORAGE_KEY = 'collabcode_rooms';
-
-interface RoomState {
-  code: string;
-  language: Language;
-  updatedBy: string;
-}
+const SYNC_INTERVAL = 50; // 50ms for low-latency sync
+const USER_COLORS = [
+  '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', 
+  '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F'
+];
 
 export function useRealtimeRoom(roomId?: string) {
   const [room, setRoom] = useState<Room | null>(null);
   const [isViewOnly, setIsViewOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   const [connectedUsers, setConnectedUsers] = useState<number>(1);
+  const [remotePresence, setRemotePresence] = useState<UserPresence[]>([]);
   
   const channelRef = useRef<RealtimeChannel | null>(null);
   const userIdRef = useRef<string>(nanoid(8));
+  const userNameRef = useRef<string>(`User-${userIdRef.current.slice(0, 4)}`);
+  const userColorRef = useRef<string>(USER_COLORS[Math.floor(Math.random() * USER_COLORS.length)]);
   const isOwnerRef = useRef<boolean>(false);
+  const pendingCodeRef = useRef<string | null>(null);
+  const syncTimerRef = useRef<number | null>(null);
+  const lastSyncRef = useRef<number>(0);
 
   // Get stored room data
   const getStoredRoom = useCallback((id: string) => {
@@ -65,6 +70,65 @@ export function useRealtimeRoom(roomId?: string) {
     return newRoom;
   }, [saveToStorage]);
 
+  // Throttled broadcast for code updates
+  const broadcastCodeUpdate = useCallback((code: string, language: Language) => {
+    if (!channelRef.current) return;
+    
+    const now = Date.now();
+    pendingCodeRef.current = code;
+
+    if (now - lastSyncRef.current >= SYNC_INTERVAL) {
+      lastSyncRef.current = now;
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'code_update',
+        payload: {
+          code,
+          language,
+          updatedBy: userIdRef.current,
+          timestamp: now,
+        },
+      });
+      pendingCodeRef.current = null;
+    } else {
+      // Schedule sync for pending update
+      if (syncTimerRef.current) {
+        clearTimeout(syncTimerRef.current);
+      }
+      syncTimerRef.current = window.setTimeout(() => {
+        if (pendingCodeRef.current !== null && channelRef.current) {
+          lastSyncRef.current = Date.now();
+          channelRef.current.send({
+            type: 'broadcast',
+            event: 'code_update',
+            payload: {
+              code: pendingCodeRef.current,
+              language,
+              updatedBy: userIdRef.current,
+              timestamp: Date.now(),
+            },
+          });
+          pendingCodeRef.current = null;
+        }
+      }, SYNC_INTERVAL - (now - lastSyncRef.current));
+    }
+  }, []);
+
+  // Update cursor position
+  const updateCursor = useCallback((cursor: CursorPosition | null, selection?: { start: CursorPosition; end: CursorPosition }) => {
+    if (!channelRef.current) return;
+    
+    channelRef.current.track({
+      user_id: userIdRef.current,
+      name: userNameRef.current,
+      color: userColorRef.current,
+      is_owner: isOwnerRef.current,
+      cursor,
+      selection,
+      online_at: new Date().toISOString(),
+    });
+  }, []);
+
   // Subscribe to realtime channel
   const subscribeToChannel = useCallback((id: string, initialRoom: Room) => {
     // Unsubscribe from existing channel
@@ -81,26 +145,39 @@ export function useRealtimeRoom(roomId?: string) {
       },
     });
 
-    // Track presence for connected users
+    // Track presence for connected users and cursors
     channel.on('presence', { event: 'sync' }, () => {
       const state = channel.presenceState();
-      const userCount = Object.keys(state).length;
-      console.log('Presence sync:', userCount, 'users');
-      setConnectedUsers(userCount);
+      const users: UserPresence[] = [];
+      
+      Object.entries(state).forEach(([key, presences]) => {
+        if (key !== userIdRef.current && presences.length > 0) {
+          const presence = presences[0] as any;
+          users.push({
+            id: presence.user_id,
+            name: presence.name || `User-${key.slice(0, 4)}`,
+            color: presence.color || USER_COLORS[0],
+            cursor: presence.cursor,
+            selection: presence.selection,
+            isOwner: presence.is_owner || false,
+          });
+        }
+      });
+      
+      setRemotePresence(users);
+      setConnectedUsers(Object.keys(state).length);
     });
 
     // Listen for code updates
     channel.on('broadcast', { event: 'code_update' }, ({ payload }) => {
-      console.log('Received code update:', payload);
       if (payload.updatedBy !== userIdRef.current) {
         setRoom(prev => {
           if (!prev) return prev;
-          const updated = {
+          return {
             ...prev,
             code: payload.code,
             language: payload.language,
           };
-          return updated;
         });
       }
     });
@@ -109,17 +186,20 @@ export function useRealtimeRoom(roomId?: string) {
     channel.on('broadcast', { event: 'request_state' }, ({ payload }) => {
       console.log('State requested by:', payload.userId);
       // Only owner broadcasts current state
-      if (isOwnerRef.current && room) {
-        console.log('Broadcasting current state to new user');
-        channel.send({
-          type: 'broadcast',
-          event: 'sync_state',
-          payload: {
-            code: room.code,
-            language: room.language,
-            fromOwner: true,
-          },
-        });
+      if (isOwnerRef.current) {
+        const currentRoom = getStoredRoom(id);
+        if (currentRoom) {
+          console.log('Broadcasting current state to new user');
+          channel.send({
+            type: 'broadcast',
+            event: 'sync_state',
+            payload: {
+              code: currentRoom.code,
+              language: currentRoom.language,
+              fromOwner: true,
+            },
+          });
+        }
       }
     });
 
@@ -141,11 +221,13 @@ export function useRealtimeRoom(roomId?: string) {
     channel.subscribe(async (status) => {
       console.log('Channel status:', status);
       if (status === 'SUBSCRIBED') {
-        // Track presence
+        // Track presence with user info
         await channel.track({
-          online_at: new Date().toISOString(),
           user_id: userIdRef.current,
+          name: userNameRef.current,
+          color: userColorRef.current,
           is_owner: isOwnerRef.current,
+          online_at: new Date().toISOString(),
         });
 
         // If not owner, request current state
@@ -161,7 +243,7 @@ export function useRealtimeRoom(roomId?: string) {
     });
 
     channelRef.current = channel;
-  }, [room]);
+  }, [getStoredRoom]);
 
   // Update room code with broadcast
   const updateCode = useCallback((code: string) => {
@@ -171,20 +253,9 @@ export function useRealtimeRoom(roomId?: string) {
     setRoom(updatedRoom);
     saveToStorage(updatedRoom);
 
-    // Broadcast to other users
-    if (channelRef.current) {
-      console.log('Broadcasting code update');
-      channelRef.current.send({
-        type: 'broadcast',
-        event: 'code_update',
-        payload: {
-          code,
-          language: room.language,
-          updatedBy: userIdRef.current,
-        },
-      });
-    }
-  }, [room, isViewOnly, saveToStorage]);
+    // Broadcast to other users with throttling
+    broadcastCodeUpdate(code, room.language);
+  }, [room, isViewOnly, saveToStorage, broadcastCodeUpdate]);
 
   // Update room language with broadcast
   const updateLanguage = useCallback((language: Language) => {
@@ -257,6 +328,9 @@ export function useRealtimeRoom(roomId?: string) {
 
     // Cleanup on unmount
     return () => {
+      if (syncTimerRef.current) {
+        clearTimeout(syncTimerRef.current);
+      }
       if (channelRef.current) {
         console.log('Cleaning up channel');
         supabase.removeChannel(channelRef.current);
@@ -264,20 +338,17 @@ export function useRealtimeRoom(roomId?: string) {
     };
   }, [roomId]);
 
-  // Re-subscribe when room changes (for owner broadcasting updates)
-  useEffect(() => {
-    if (room && channelRef.current && isOwnerRef.current) {
-      // Keep the room ref updated for broadcasting state to new users
-    }
-  }, [room]);
-
   return {
     room,
     isViewOnly,
     loading,
     connectedUsers,
+    remotePresence,
     createRoom,
     updateCode,
     updateLanguage,
+    updateCursor,
+    userId: userIdRef.current,
+    userColor: userColorRef.current,
   };
 }
