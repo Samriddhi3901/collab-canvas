@@ -8,14 +8,22 @@ import { OutputConsole } from '@/components/OutputConsole';
 import { RunButton } from '@/components/RunButton';
 import { useRealtimeRoom } from '@/hooks/useRealtimeRoom';
 import { useCodeRunner } from '@/hooks/useCodeRunner';
-import { ViewMode, Language } from '@/types/editor';
+import { ViewMode, Language, UserPresence, CursorPosition } from '@/types/editor';
 import { Code2, PenTool } from 'lucide-react';
 
 const Index = () => {
   const [searchParams] = useSearchParams();
   const roomIdFromUrl = searchParams.get('room');
   
-  const { room, isViewOnly, connectedUsers, updateCode, updateLanguage } = useRealtimeRoom(roomIdFromUrl || undefined);
+  const { 
+    room, 
+    isViewOnly, 
+    connectedUsers, 
+    remotePresence,
+    updateCode, 
+    updateLanguage,
+    updateCursor,
+  } = useRealtimeRoom(roomIdFromUrl || undefined);
   const { status, output, runCode, clearOutput } = useCodeRunner();
   
   const [viewMode, setViewMode] = useState<ViewMode>('split');
@@ -106,6 +114,8 @@ const Index = () => {
                     language={room.language}
                     onChange={updateCode}
                     isReadOnly={isViewOnly}
+                    remotePresence={remotePresence}
+                    onCursorChange={updateCursor}
                   />
                 </div>
                 <div className="w-96 min-h-0">
@@ -143,6 +153,8 @@ const Index = () => {
                     language={room.language}
                     onChange={updateCode}
                     isViewOnly={isViewOnly}
+                    remotePresence={remotePresence}
+                    onCursorChange={updateCursor}
                   />
                 </div>
 
@@ -164,9 +176,11 @@ interface SplitViewPanelProps {
   language: Language;
   onChange: (code: string) => void;
   isViewOnly: boolean;
+  remotePresence?: UserPresence[];
+  onCursorChange?: (cursor: CursorPosition | null, selection?: { start: CursorPosition; end: CursorPosition }) => void;
 }
 
-function SplitViewPanel({ code, language, onChange, isViewOnly }: SplitViewPanelProps) {
+function SplitViewPanel({ code, language, onChange, isViewOnly, remotePresence, onCursorChange }: SplitViewPanelProps) {
   const [activeTab, setActiveTab] = useState<'code' | 'whiteboard'>('code');
 
   return (
@@ -209,6 +223,8 @@ function SplitViewPanel({ code, language, onChange, isViewOnly }: SplitViewPanel
                 language={language}
                 onChange={onChange}
                 isReadOnly={isViewOnly}
+                remotePresence={remotePresence}
+                onCursorChange={onCursorChange}
               />
             </motion.div>
           ) : (

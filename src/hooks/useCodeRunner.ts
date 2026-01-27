@@ -1,9 +1,10 @@
 import { useState, useCallback, useRef } from 'react';
 import { Language, RunStatus, OutputLine } from '@/types/editor';
+import { supabase } from '@/integrations/supabase/client';
 
 declare global {
   interface Window {
-    loadPyodide: () => Promise<any>;
+    loadPyodide: (config?: { indexURL?: string }) => Promise<any>;
     pyodide: any;
   }
 }
@@ -32,23 +33,35 @@ export function useCodeRunner() {
     }
 
     pyodideLoadingRef.current = (async () => {
+      const PYODIDE_VERSION = '0.27.0';
+      const PYODIDE_CDN = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`;
+      
       // Load Pyodide script
       if (!document.getElementById('pyodide-script')) {
         const script = document.createElement('script');
         script.id = 'pyodide-script';
-        script.src = 'https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js';
+        script.src = `${PYODIDE_CDN}pyodide.js`;
         document.head.appendChild(script);
         
-        await new Promise<void>((resolve) => {
+        await new Promise<void>((resolve, reject) => {
           script.onload = () => resolve();
+          script.onerror = () => reject(new Error('Failed to load Pyodide'));
         });
       }
 
-      addOutput('info', '⏳ Loading Python runtime...');
-      const pyodide = await window.loadPyodide();
-      pyodideRef.current = pyodide;
-      addOutput('info', '✅ Python runtime loaded!');
-      return pyodide;
+      addOutput('info', '⏳ Loading Python runtime (this may take a moment)...');
+      
+      try {
+        const pyodide = await window.loadPyodide({
+          indexURL: PYODIDE_CDN,
+        });
+        pyodideRef.current = pyodide;
+        addOutput('info', '✅ Python runtime ready!');
+        return pyodide;
+      } catch (err: any) {
+        addOutput('error', `Failed to load Python: ${err.message}`);
+        throw err;
+      }
     })();
 
     return pyodideLoadingRef.current;
@@ -127,42 +140,83 @@ export function useCodeRunner() {
   }, []);
 
   const runPython = useCallback(async (code: string) => {
-    const pyodide = await loadPyodide();
+    const logs: OutputLine[] = [];
     
-    // Redirect Python stdout
-    pyodide.runPython(`
+    try {
+      const pyodide = await loadPyodide();
+      
+      // Reset stdout/stderr before each run
+      pyodide.runPython(`
 import sys
 from io import StringIO
 sys.stdout = StringIO()
 sys.stderr = StringIO()
-    `);
+      `);
 
-    const logs: OutputLine[] = [];
-
-    try {
-      pyodide.runPython(code);
+      // Run the user code
+      await pyodide.runPythonAsync(code);
       
+      // Capture output
       const stdout = pyodide.runPython('sys.stdout.getvalue()');
       const stderr = pyodide.runPython('sys.stderr.getvalue()');
 
       if (stdout) {
-        stdout.split('\n').filter(Boolean).forEach((line: string) => {
-          logs.push({ type: 'log', content: line, timestamp: new Date() });
+        stdout.split('\n').forEach((line: string) => {
+          if (line) logs.push({ type: 'log', content: line, timestamp: new Date() });
         });
       }
 
       if (stderr) {
-        stderr.split('\n').filter(Boolean).forEach((line: string) => {
-          logs.push({ type: 'error', content: line, timestamp: new Date() });
+        stderr.split('\n').forEach((line: string) => {
+          if (line) logs.push({ type: 'error', content: line, timestamp: new Date() });
         });
+      }
+
+      if (logs.length === 0) {
+        logs.push({ type: 'info', content: '(No output)', timestamp: new Date() });
       }
 
       return logs;
     } catch (error: any) {
-      logs.push({ type: 'error', content: error.message, timestamp: new Date() });
+      // Format Python error nicely
+      const errorMsg = error.message || String(error);
+      logs.push({ type: 'error', content: errorMsg, timestamp: new Date() });
       return logs;
     }
   }, [loadPyodide]);
+
+  const runBackend = useCallback(async (code: string, language: 'cpp' | 'java'): Promise<OutputLine[]> => {
+    const logs: OutputLine[] = [];
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('run-code', {
+        body: { code, language },
+      });
+
+      if (error) {
+        logs.push({ type: 'error', content: `Backend error: ${error.message}`, timestamp: new Date() });
+        return logs;
+      }
+
+      if (data.success) {
+        if (data.output) {
+          data.output.split('\n').forEach((line: string) => {
+            logs.push({ type: 'log', content: line, timestamp: new Date() });
+          });
+        }
+        if (data.executionTime !== undefined) {
+          logs.push({ type: 'info', content: `⏱ Execution time: ${data.executionTime}ms`, timestamp: new Date() });
+        }
+      } else {
+        logs.push({ type: 'error', content: data.error || 'Unknown error', timestamp: new Date() });
+      }
+
+      return logs;
+    } catch (err: any) {
+      logs.push({ type: 'error', content: `Failed to run code: ${err.message}`, timestamp: new Date() });
+      return logs;
+    }
+  }, []);
 
   const runCode = useCallback(async (code: string, language: Language) => {
     setStatus('running');
@@ -181,10 +235,9 @@ sys.stderr = StringIO()
           break;
         case 'cpp':
         case 'java':
-          addOutput('warn', `⚠️ ${language.toUpperCase()} execution requires a backend compiler.`);
-          addOutput('info', '💡 For now, JavaScript and Python are fully supported in-browser.');
-          setStatus('success');
-          return;
+          addOutput('info', `🔧 Compiling ${language.toUpperCase()} on server...`);
+          logs = await runBackend(code, language);
+          break;
         default:
           throw new Error(`Unsupported language: ${language}`);
       }
@@ -197,7 +250,7 @@ sys.stderr = StringIO()
       addOutput('error', `❌ Error: ${error.message}`);
       setStatus('error');
     }
-  }, [clearOutput, addOutput, runJavaScript, runPython]);
+  }, [clearOutput, addOutput, runJavaScript, runPython, runBackend]);
 
   return {
     status,
