@@ -1,4 +1,4 @@
-CollabCode is an AI-generated online coding platform built with typescript , featuring a Monaco Editor-based code editor and interactive whiteboard.
+CollabCode - is an AI-generated online coding platform built with typescript , featuring a Monaco Editor-based code editor and interactive whiteboard.
 
 Key Features
 Multi-Language Support: C++, Java, Python, JavaScript with syntax highlighting and hover-based error corrections/suggestions.
