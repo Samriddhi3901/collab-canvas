@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Navbar } from '@/components/Navbar';
@@ -6,8 +6,11 @@ import { CodeEditor } from '@/components/CodeEditor';
 import { WhiteboardCanvas } from '@/components/WhiteboardCanvas';
 import { OutputConsole } from '@/components/OutputConsole';
 import { RunButton } from '@/components/RunButton';
+import { FlowchartButton } from '@/components/FlowchartButton';
+import { FlowchartPanel } from '@/components/FlowchartPanel';
 import { useRealtimeRoom } from '@/hooks/useRealtimeRoom';
 import { useCodeRunner } from '@/hooks/useCodeRunner';
+import { useFlowchartGenerator } from '@/hooks/useFlowchartGenerator';
 import { ViewMode, Language, UserPresence, CursorPosition } from '@/types/editor';
 import { Code2, PenTool } from 'lucide-react';
 import { WhiteboardSnapshot } from '@/components/WhiteboardCanvas';
@@ -28,8 +31,11 @@ const Index = () => {
     broadcastWhiteboard,
   } = useRealtimeRoom(roomIdFromUrl || undefined);
   const { status, output, runCode, clearOutput } = useCodeRunner();
+  const { flowchartData, isGenerating, error: flowchartError, generateFlowchart, clearFlowchart } = useFlowchartGenerator();
   
   const [viewMode, setViewMode] = useState<ViewMode>('split');
+  const [showFlowchart, setShowFlowchart] = useState(false);
+  const editorRef = useRef<any>(null);
 
   const handleRun = useCallback(() => {
     if (room) {
@@ -37,10 +43,39 @@ const Index = () => {
     }
   }, [room, runCode]);
 
+  const handleFlowchart = useCallback(() => {
+    if (room) {
+      if (showFlowchart) {
+        setShowFlowchart(false);
+        clearFlowchart();
+      } else {
+        setShowFlowchart(true);
+        generateFlowchart(room.code, room.language);
+      }
+    }
+  }, [room, showFlowchart, generateFlowchart, clearFlowchart]);
+
+  const handleCloseFlowchart = useCallback(() => {
+    setShowFlowchart(false);
+    clearFlowchart();
+  }, [clearFlowchart]);
+
+  const handleNodeClick = useCallback((lineNumber: number) => {
+    if (editorRef.current) {
+      editorRef.current.revealLineInCenter(lineNumber);
+      editorRef.current.setPosition({ lineNumber, column: 1 });
+      editorRef.current.focus();
+    }
+  }, []);
+
   const handleLanguageChange = useCallback((lang: Language) => {
     updateLanguage(lang);
     clearOutput();
-  }, [updateLanguage, clearOutput]);
+    if (showFlowchart) {
+      setShowFlowchart(false);
+      clearFlowchart();
+    }
+  }, [updateLanguage, clearOutput, showFlowchart, clearFlowchart]);
 
   if (!room) {
     return (
@@ -95,7 +130,15 @@ const Index = () => {
                 {room.language === 'java' && '☕ Java'}
               </span>
             </div>
-            <RunButton onRun={handleRun} status={status} disabled={isViewOnly} />
+            <div className="flex items-center gap-2">
+              <FlowchartButton 
+                onClick={handleFlowchart} 
+                isGenerating={isGenerating} 
+                isActive={showFlowchart}
+                disabled={isViewOnly}
+              />
+              <RunButton onRun={handleRun} status={status} disabled={isViewOnly} />
+            </div>
           </motion.div>
         )}
 
@@ -122,7 +165,22 @@ const Index = () => {
                   />
                 </div>
                 <div className="w-96 min-h-0">
-                  <OutputConsole output={output} status={status} onClear={clearOutput} />
+                  <AnimatePresence mode="wait">
+                    {showFlowchart ? (
+                      <FlowchartPanel
+                        key="flowchart"
+                        data={flowchartData}
+                        error={flowchartError}
+                        isGenerating={isGenerating}
+                        onClose={handleCloseFlowchart}
+                        onNodeClick={handleNodeClick}
+                      />
+                    ) : (
+                      <motion.div key="output" className="h-full">
+                        <OutputConsole output={output} status={status} onClear={clearOutput} />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               </motion.div>
             )}
@@ -169,9 +227,24 @@ const Index = () => {
                   />
                 </div>
 
-                {/* Right Panel - Output */}
+                {/* Right Panel - Output or Flowchart */}
                 <div className="w-96 min-h-0">
-                  <OutputConsole output={output} status={status} onClear={clearOutput} />
+                  <AnimatePresence mode="wait">
+                    {showFlowchart ? (
+                      <FlowchartPanel
+                        key="flowchart"
+                        data={flowchartData}
+                        error={flowchartError}
+                        isGenerating={isGenerating}
+                        onClose={handleCloseFlowchart}
+                        onNodeClick={handleNodeClick}
+                      />
+                    ) : (
+                      <motion.div key="output" className="h-full">
+                        <OutputConsole output={output} status={status} onClear={clearOutput} />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               </motion.div>
             )}
