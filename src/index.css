@@ -209,4 +209,13 @@
   .glow-success {
     box-shadow: 0 0 20px hsl(var(--success) / 0.3);
   }
+
+  .flowchart-node {
+    cursor: pointer;
+    transition: filter 0.2s ease;
+  }
+
+  .flowchart-node:hover {
+    filter: brightness(1.3);
+  }
 }
