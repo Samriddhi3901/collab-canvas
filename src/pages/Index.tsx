@@ -10,7 +10,7 @@ import { useRealtimeRoom } from '@/hooks/useRealtimeRoom';
 import { useCodeRunner } from '@/hooks/useCodeRunner';
 import { ViewMode, Language, UserPresence, CursorPosition } from '@/types/editor';
 import { Code2, PenTool } from 'lucide-react';
-import { TLEditorSnapshot } from 'tldraw';
+import { WhiteboardSnapshot } from '@/components/WhiteboardCanvas';
 
 const Index = () => {
   const [searchParams] = useSearchParams();
@@ -189,8 +189,8 @@ interface SplitViewPanelProps {
   isViewOnly: boolean;
   remotePresence?: UserPresence[];
   onCursorChange?: (cursor: CursorPosition | null, selection?: { start: CursorPosition; end: CursorPosition }) => void;
-  onWhiteboardSnapshot?: (snapshot: TLEditorSnapshot) => void;
-  remoteWhiteboardSnapshot?: TLEditorSnapshot | null;
+  onWhiteboardSnapshot?: (snapshot: WhiteboardSnapshot) => void;
+  remoteWhiteboardSnapshot?: WhiteboardSnapshot | null;
   roomId?: string;
 }
 

@@ -1,19 +1,22 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { 
   Tldraw, 
   useEditor, 
-  getSnapshot, 
-  loadSnapshot,
-  TLEditorSnapshot,
-  Editor 
-} from 'tldraw';
-import 'tldraw/tldraw.css';
+  Editor,
+  TLStoreSnapshot,
+} from '@tldraw/tldraw';
+import '@tldraw/tldraw/tldraw.css';
 import { motion } from 'framer-motion';
+
+// Simplified snapshot type for our use case
+export interface WhiteboardSnapshot {
+  shapes: any[];
+}
 
 interface WhiteboardCanvasProps {
   isReadOnly?: boolean;
-  onSnapshot?: (snapshot: TLEditorSnapshot) => void;
-  remoteSnapshot?: TLEditorSnapshot | null;
+  onSnapshot?: (snapshot: WhiteboardSnapshot) => void;
+  remoteSnapshot?: WhiteboardSnapshot | null;
   roomId?: string;
 }
 
@@ -27,34 +30,71 @@ function WhiteboardInner({
   const lastSnapshotRef = useRef<string>('');
   const isApplyingRemote = useRef(false);
 
+  // Get current shapes as snapshot
+  const getSnapshotFromEditor = useCallback(() => {
+    if (!editor) return null;
+    const shapes = editor.getCurrentPageShapes();
+    return {
+      shapes: shapes.map(s => ({ ...s })),
+    };
+  }, [editor]);
+
+  // Apply snapshot to editor
+  const applySnapshotToEditor = useCallback((snapshot: WhiteboardSnapshot) => {
+    if (!editor || !snapshot) return;
+    
+    try {
+      isApplyingRemote.current = true;
+      
+      // Get current shape IDs
+      const currentShapes = editor.getCurrentPageShapes();
+      const currentIds = currentShapes.map(s => s.id);
+      
+      // Delete all current shapes
+      if (currentIds.length > 0) {
+        editor.deleteShapes(currentIds);
+      }
+      
+      // Add new shapes from snapshot
+      if (snapshot.shapes && snapshot.shapes.length > 0) {
+        editor.createShapes(snapshot.shapes);
+      }
+    } catch (error) {
+      console.error('Failed to apply snapshot:', error);
+    } finally {
+      isApplyingRemote.current = false;
+    }
+  }, [editor]);
+
   // Listen to store changes and broadcast
   useEffect(() => {
     if (!editor || isReadOnly) return;
 
-    const handleStoreChange = () => {
+    let timeoutId: number | null = null;
+    
+    const handleChange = () => {
       if (isApplyingRemote.current) return;
       
-      const snapshot = getSnapshot(editor.store);
-      const snapshotStr = JSON.stringify(snapshot.document);
-      
-      // Only broadcast if content actually changed
-      if (snapshotStr !== lastSnapshotRef.current) {
-        lastSnapshotRef.current = snapshotStr;
-        onSnapshot?.({ document: snapshot.document, session: snapshot.session });
+      if (timeoutId) {
+        clearTimeout(timeoutId);
       }
-    };
-
-    // Throttle updates to avoid too many broadcasts
-    let timeoutId: number | null = null;
-    const throttledHandler = () => {
-      if (timeoutId) return;
+      
       timeoutId = window.setTimeout(() => {
-        handleStoreChange();
+        const snapshot = getSnapshotFromEditor();
+        if (!snapshot) return;
+        
+        const snapshotStr = JSON.stringify(snapshot);
+        
+        // Only broadcast if content actually changed
+        if (snapshotStr !== lastSnapshotRef.current) {
+          lastSnapshotRef.current = snapshotStr;
+          onSnapshot?.(snapshot);
+        }
         timeoutId = null;
       }, 100);
     };
 
-    const unsubscribe = editor.store.listen(throttledHandler, { 
+    const unsubscribe = editor.store.listen(handleChange, { 
       source: 'user',
       scope: 'document' 
     });
@@ -63,25 +103,18 @@ function WhiteboardInner({
       unsubscribe();
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [editor, isReadOnly, onSnapshot]);
+  }, [editor, isReadOnly, onSnapshot, getSnapshotFromEditor]);
 
   // Apply remote snapshots
   useEffect(() => {
     if (!editor || !remoteSnapshot) return;
     
-    const remoteStr = JSON.stringify(remoteSnapshot.document);
+    const remoteStr = JSON.stringify(remoteSnapshot);
     if (remoteStr === lastSnapshotRef.current) return;
     
-    isApplyingRemote.current = true;
-    try {
-      loadSnapshot(editor.store, { document: remoteSnapshot.document });
-      lastSnapshotRef.current = remoteStr;
-    } catch (error) {
-      console.error('Failed to load remote snapshot:', error);
-    } finally {
-      isApplyingRemote.current = false;
-    }
-  }, [editor, remoteSnapshot]);
+    lastSnapshotRef.current = remoteStr;
+    applySnapshotToEditor(remoteSnapshot);
+  }, [editor, remoteSnapshot, applySnapshotToEditor]);
 
   // Set read-only mode
   useEffect(() => {
@@ -101,10 +134,24 @@ export function WhiteboardCanvas({
   remoteSnapshot,
   roomId 
 }: WhiteboardCanvasProps) {
+  const [mounted, setMounted] = useState(false);
+  
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const handleMount = useCallback((editor: Editor) => {
     // Set dark mode
     editor.user.updateUserPreferences({ colorScheme: 'dark' });
   }, []);
+
+  if (!mounted) {
+    return (
+      <div className="h-full w-full rounded-lg overflow-hidden bg-[#1e1e1e] flex items-center justify-center">
+        <span className="text-muted-foreground">Loading whiteboard...</span>
+      </div>
+    );
+  }
 
   return (
     <motion.div 
