@@ -3,7 +3,7 @@ import { nanoid } from 'nanoid';
 import { supabase } from '@/integrations/supabase/client';
 import { Language, LANGUAGE_CONFIG, Room, UserPresence, CursorPosition } from '@/types/editor';
 import { RealtimeChannel } from '@supabase/supabase-js';
-import { TLEditorSnapshot } from 'tldraw';
+import { WhiteboardSnapshot } from '@/components/WhiteboardCanvas';
 
 const STORAGE_KEY = 'collabcode_rooms';
 const SYNC_INTERVAL = 50; // 50ms for low-latency sync
@@ -18,7 +18,7 @@ export function useRealtimeRoom(roomId?: string) {
   const [loading, setLoading] = useState(true);
   const [connectedUsers, setConnectedUsers] = useState<number>(1);
   const [remotePresence, setRemotePresence] = useState<UserPresence[]>([]);
-  const [remoteWhiteboardSnapshot, setRemoteWhiteboardSnapshot] = useState<TLEditorSnapshot | null>(null);
+  const [remoteWhiteboardSnapshot, setRemoteWhiteboardSnapshot] = useState<WhiteboardSnapshot | null>(null);
   
   const channelRef = useRef<RealtimeChannel | null>(null);
   const userIdRef = useRef<string>(nanoid(8));
@@ -28,8 +28,9 @@ export function useRealtimeRoom(roomId?: string) {
   const pendingCodeRef = useRef<string | null>(null);
   const syncTimerRef = useRef<number | null>(null);
   const lastSyncRef = useRef<number>(0);
-  const whiteboardSnapshotRef = useRef<TLEditorSnapshot | null>(null);
+  const whiteboardSnapshotRef = useRef<WhiteboardSnapshot | null>(null);
   const lastWhiteboardSyncRef = useRef<number>(0);
+  const isFirstJoin = useRef<boolean>(true);
 
   // Get stored room data
   const getStoredRoom = useCallback((id: string) => {
@@ -119,7 +120,7 @@ export function useRealtimeRoom(roomId?: string) {
   }, []);
 
   // Broadcast whiteboard snapshot
-  const broadcastWhiteboard = useCallback((snapshot: TLEditorSnapshot) => {
+  const broadcastWhiteboard = useCallback((snapshot: WhiteboardSnapshot) => {
     if (!channelRef.current) return;
     
     const now = Date.now();
@@ -127,6 +128,8 @@ export function useRealtimeRoom(roomId?: string) {
     
     lastWhiteboardSyncRef.current = now;
     whiteboardSnapshotRef.current = snapshot;
+    
+    console.log('Broadcasting whiteboard update:', snapshot.shapes?.length, 'shapes');
     
     channelRef.current.send({
       type: 'broadcast',
