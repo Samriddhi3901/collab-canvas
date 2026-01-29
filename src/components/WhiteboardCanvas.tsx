@@ -39,25 +39,54 @@ function WhiteboardInner({
     };
   }, [editor]);
 
-  // Apply snapshot to editor
+  // Apply snapshot to editor (diff-based to prevent lag/flicker)
   const applySnapshotToEditor = useCallback((snapshot: WhiteboardSnapshot) => {
     if (!editor || !snapshot) return;
-    
+
     try {
       isApplyingRemote.current = true;
-      
-      // Get current shape IDs
+
+      const nextShapes = Array.isArray(snapshot.shapes) ? snapshot.shapes : [];
       const currentShapes = editor.getCurrentPageShapes();
-      const currentIds = currentShapes.map(s => s.id);
-      
-      // Delete all current shapes
-      if (currentIds.length > 0) {
-        editor.deleteShapes(currentIds);
+
+      const currentById = new Map(currentShapes.map((s: any) => [s.id, s]));
+      const nextById = new Map(nextShapes.map((s: any) => [s.id, s]));
+
+      const toDelete: any[] = [];
+      const toCreate: any[] = [];
+      const toUpdate: any[] = [];
+
+      for (const cur of currentShapes as any[]) {
+        if (!nextById.has(cur.id)) toDelete.push(cur);
       }
-      
-      // Add new shapes from snapshot
-      if (snapshot.shapes && snapshot.shapes.length > 0) {
-        editor.createShapes(snapshot.shapes);
+
+      for (const next of nextShapes as any[]) {
+        const cur = currentById.get(next.id);
+        if (!cur) {
+          toCreate.push(next);
+        } else {
+          // Only update when shape actually changed
+          // (avoids store churn and reduces perceived lag)
+          const curStr = JSON.stringify(cur);
+          const nextStr = JSON.stringify(next);
+          if (curStr !== nextStr) {
+            toUpdate.push(next);
+          }
+        }
+      }
+
+      const run = (editor as any).run;
+      const apply = () => {
+        if (toDelete.length) editor.deleteShapes(toDelete);
+        if (toCreate.length) editor.createShapes(toCreate);
+        if (toUpdate.length) editor.updateShapes(toUpdate);
+      };
+
+      // Batch mutations when available
+      if (typeof run === 'function') {
+        run(apply);
+      } else {
+        apply();
       }
     } catch (error) {
       console.error('Failed to apply snapshot:', error);
@@ -119,10 +148,9 @@ function WhiteboardInner({
   // Set read-only mode
   useEffect(() => {
     if (!editor) return;
-    
-    if (isReadOnly) {
-      editor.updateInstanceState({ isReadonly: true });
-    }
+
+    // Keep this in sync both ways (not only when turning on)
+    editor.updateInstanceState({ isReadonly: !!isReadOnly });
   }, [editor, isReadOnly]);
 
   return null;

@@ -189,9 +189,12 @@ const Index = () => {
             {viewMode === 'whiteboard' && (
               <motion.div
                 key="whiteboard-view"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 20 }}
+                // IMPORTANT: Avoid transform animations here.
+                // CSS transforms on the tldraw container (even translateX(0)) can break pointer math
+                // and lead to offset/laggy drawing.
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
                 className="flex-1 panel min-h-0"
               >
                 <WhiteboardCanvas 
