@@ -17,60 +17,98 @@ interface CodeResponse {
   executionTime?: number;
 }
 
-// Use JDoodle API for C++ and Java execution
-const JDOODLE_CLIENT_ID = Deno.env.get('JDOODLE_CLIENT_ID');
-const JDOODLE_CLIENT_SECRET = Deno.env.get('JDOODLE_CLIENT_SECRET');
+// Piston API configuration (free, no API key needed)
+const PISTON_API = 'https://emkc.org/api/v2/piston/execute';
 
-const LANGUAGE_CONFIG: Record<string, { language: string; versionIndex: string }> = {
-  cpp: { language: 'cpp17', versionIndex: '0' },
-  java: { language: 'java', versionIndex: '4' },
+const LANGUAGE_CONFIG: Record<string, { language: string; version: string }> = {
+  cpp: { language: 'c++', version: '10.2.0' },
+  java: { language: 'java', version: '15.0.2' },
 };
 
-async function executeWithJDoodle(code: string, language: string): Promise<CodeResponse> {
+async function executeWithPiston(code: string, language: string): Promise<CodeResponse> {
   const config = LANGUAGE_CONFIG[language];
   
-  if (!JDOODLE_CLIENT_ID || !JDOODLE_CLIENT_SECRET) {
-    // If no JDoodle credentials, use a simple mock for demo
+  if (!config) {
     return {
-      success: true,
-      output: `[Mock Output] ${language.toUpperCase()} code received (${code.length} chars)\n\nTo enable real ${language.toUpperCase()} execution:\n1. Get free API credentials from jdoodle.com\n2. Add JDOODLE_CLIENT_ID and JDOODLE_CLIENT_SECRET secrets`,
-      executionTime: 0,
+      success: false,
+      error: `Unsupported language: ${language}`,
     };
   }
 
   try {
     const startTime = Date.now();
     
-    const response = await fetch('https://api.jdoodle.com/v1/execute', {
+    // For Java, we need to ensure the class is named Main
+    let processedCode = code;
+    if (language === 'java') {
+      // Replace any public class name with Main for Piston compatibility
+      processedCode = code.replace(/public\s+class\s+\w+/g, 'public class Main');
+    }
+
+    console.log(`Executing ${language} code with Piston API...`);
+
+    const response = await fetch(PISTON_API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        clientId: JDOODLE_CLIENT_ID,
-        clientSecret: JDOODLE_CLIENT_SECRET,
-        script: code,
         language: config.language,
-        versionIndex: config.versionIndex,
+        version: config.version,
+        files: [
+          {
+            name: language === 'java' ? 'Main.java' : 'main.cpp',
+            content: processedCode,
+          },
+        ],
+        compile_timeout: 10000,
+        run_timeout: 5000,
+        compile_memory_limit: -1,
+        run_memory_limit: -1,
       }),
     });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Piston API error:', errorText);
+      return {
+        success: false,
+        error: `API error: ${response.status} - ${errorText}`,
+      };
+    }
 
     const result = await response.json();
     const executionTime = Date.now() - startTime;
 
-    if (result.error) {
+    console.log('Piston result:', JSON.stringify(result, null, 2));
+
+    // Check for compile errors
+    if (result.compile && result.compile.code !== 0) {
       return {
         success: false,
-        error: result.error,
+        error: result.compile.stderr || result.compile.output || 'Compilation failed',
         executionTime,
       };
     }
 
+    // Check for runtime errors
+    if (result.run && result.run.code !== 0) {
+      const errorOutput = result.run.stderr || result.run.output || 'Runtime error';
+      return {
+        success: false,
+        error: errorOutput,
+        executionTime,
+      };
+    }
+
+    // Success - return stdout
+    const output = result.run?.stdout || result.run?.output || '';
+    
     return {
       success: true,
-      output: result.output || '',
+      output: output || '(No output)',
       executionTime,
     };
   } catch (error: any) {
-    console.error('JDoodle execution error:', error);
+    console.error('Piston execution error:', error);
     return {
       success: false,
       error: error.message || 'Execution failed',
@@ -87,7 +125,7 @@ serve(async (req) => {
   try {
     const { code, language }: CodeRequest = await req.json();
 
-    console.log(`Executing ${language} code (${code.length} chars)`);
+    console.log(`Received ${language} code (${code.length} chars)`);
 
     if (!code || !language) {
       return new Response(
@@ -103,7 +141,7 @@ serve(async (req) => {
       );
     }
 
-    const result = await executeWithJDoodle(code, language);
+    const result = await executeWithPiston(code, language);
 
     console.log(`Execution complete: ${result.success ? 'success' : 'error'}`);
 
