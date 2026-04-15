@@ -9,7 +9,6 @@ View Modes: Toggle between Code-only, Whiteboard-only, or Split view (editor + w
 Execution: Run button for code execution using Pyodide/WebAssembly; output console on right panel.
 
 Dark Theme UI: Matches CollabCode design with top nav, language selector, and tool buttons.
-​
 Select language, write/test code, draw on whiteboard.
 
 Collaborate via real-time sharing (invite via email).
