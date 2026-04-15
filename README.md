@@ -4,7 +4,7 @@ Key Features
 Multi-Language Support: C++, Java, Python, JavaScript with syntax highlighting and hover-based error corrections/suggestions.
 
 View Modes: Toggle between Code-only, Whiteboard-only, or Split view (editor + whiteboard).
-​
+
 
 Execution: Run button for code execution using Pyodide/WebAssembly; output console on right panel.
 
